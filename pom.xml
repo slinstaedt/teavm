@@ -75,6 +75,7 @@
     <java-tests.version>11</java-tests.version>
     <rhino.version>1.7.11</rhino.version>
     <maven-compiler-plugin.version>3.8.0</maven-compiler-plugin.version>
+    <testng.version>7.1.0</testng.version>
 
     <teavm.test.incremental>false</teavm.test.incremental>
     <teavm.test.threads>1</teavm.test.threads>
@@ -209,6 +210,11 @@
         <groupId>org.mozilla</groupId>
         <artifactId>rhino</artifactId>
         <version>${rhino.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.testng</groupId>
+        <artifactId>testng</artifactId>
+        <version>${testng.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

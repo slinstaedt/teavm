@@ -32,6 +32,7 @@
 package org.threeten.bp.jdk8;
 
 import org.threeten.bp.temporal.Temporal;
+import org.threeten.bp.temporal.TemporalAccessor;
 import org.threeten.bp.temporal.TemporalAdjuster;
 import org.threeten.bp.temporal.TemporalAmount;
 import org.threeten.bp.temporal.TemporalUnit;
@@ -41,8 +42,7 @@ import org.threeten.bp.temporal.TemporalUnit;
  * methods once integrated into JDK 8.
  */
 public abstract class DefaultInterfaceTemporal
-        extends DefaultInterfaceTemporalAccessor
-        implements Temporal {
+        implements Temporal, TemporalAccessor {
 
     @Override
     public Temporal with(TemporalAdjuster adjuster) {
