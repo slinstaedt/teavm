@@ -26,6 +26,7 @@ import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -70,12 +71,13 @@ import org.teavm.dependency.FastDependencyAnalyzer;
 import org.teavm.dependency.PreciseDependencyAnalyzer;
 import org.teavm.diagnostics.DefaultProblemTextConsumer;
 import org.teavm.diagnostics.Problem;
-import org.teavm.model.AnnotationHolder;
+import org.teavm.model.AnnotationReader;
 import org.teavm.model.AnnotationValue;
 import org.teavm.model.ClassHolder;
 import org.teavm.model.ClassHolderSource;
 import org.teavm.model.MethodDescriptor;
 import org.teavm.model.MethodHolder;
+import org.teavm.model.MethodReader;
 import org.teavm.model.MethodReference;
 import org.teavm.model.PreOptimizingClassHolderSource;
 import org.teavm.model.ReferenceCache;
@@ -87,14 +89,21 @@ import org.teavm.vm.TeaVM;
 import org.teavm.vm.TeaVMBuilder;
 import org.teavm.vm.TeaVMOptimizationLevel;
 import org.teavm.vm.TeaVMTarget;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.DataProvider;
 
 public class TeaVMTestRunner extends Runner implements Filterable {
     static final String JUNIT3_BASE_CLASS = "junit.framework.TestCase";
     static final MethodReference JUNIT3_BEFORE = new MethodReference(JUNIT3_BASE_CLASS, "setUp", ValueType.VOID);
     static final MethodReference JUNIT3_AFTER = new MethodReference(JUNIT3_BASE_CLASS, "tearDown", ValueType.VOID);
     static final String JUNIT4_TEST = "org.junit.Test";
+    static final String TESTNG_TEST = "org.testng.annotations.Test";
     static final String JUNIT4_BEFORE = "org.junit.Before";
+    static final String TESTNG_BEFORE = "org.testng.annotations.BeforeMethod";
     static final String JUNIT4_AFTER = "org.junit.After";
+    static final String TESTNG_AFTER = "org.testng.annotations.AfterMethod";
+    static final String TESTNG_PROVIDER = "org.testng.annotations.DataProvider";
     private static final String PATH_PARAM = "teavm.junit.target";
     private static final String JS_RUNNER = "teavm.junit.js.runner";
     private static final String THREAD_COUNT = "teavm.junit.threads";
@@ -237,11 +246,18 @@ public class TeaVMTestRunner extends Runner implements Filterable {
     }
 
     private boolean isTestMethod(Method method) {
+        if (!Modifier.isPublic(method.getModifiers())) {
+            return false;
+        }
+
         if (TestCase.class.isAssignableFrom(method.getDeclaringClass())) {
             return method.getName().startsWith("test") && method.getName().length() > 4
                     && Character.isUpperCase(method.getName().charAt(4));
+        } else if (method.getDeclaringClass().isAnnotationPresent(org.testng.annotations.Test.class)) {
+            return method.getName().startsWith("test_");
         } else {
-            return method.isAnnotationPresent(Test.class);
+            return method.isAnnotationPresent(Test.class)
+                    || method.isAnnotationPresent(org.testng.annotations.Test.class);
         }
     }
 
@@ -302,23 +318,11 @@ public class TeaVMTestRunner extends Runner implements Filterable {
         boolean ran = false;
         boolean success = true;
 
-        ClassHolder classHolder = classSource.get(child.getDeclaringClass().getName());
-        MethodHolder methodHolder = classHolder.getMethod(getDescriptor(child));
-        Set<Class<?>> expectedExceptions = new HashSet<>();
-        for (String exceptionName : getExpectedExceptions(methodHolder)) {
-            try {
-                expectedExceptions.add(Class.forName(exceptionName, false, classLoader));
-            } catch (ClassNotFoundException e) {
-                notifier.fireTestFailure(new Failure(description, e));
-                notifier.fireTestFinished(description);
-                latch.countDown();
-                return;
-            }
-        }
-
         if (!child.isAnnotationPresent(SkipJVM.class) && !testClass.isAnnotationPresent(SkipJVM.class)) {
             ran = true;
-            success = runInJvm(child, notifier, expectedExceptions);
+            ClassHolder classHolder = classSource.get(child.getDeclaringClass().getName());
+            MethodHolder methodHolder = classHolder.getMethod(getDescriptor(child));
+            success = runInJvm(child, notifier, getExpectedExceptions(methodHolder));
         }
 
         if (success && outputDir != null) {
@@ -441,119 +445,167 @@ public class TeaVMTestRunner extends Runner implements Filterable {
         onSuccess.accept(true);
     }
 
-    private String[] getExpectedExceptions(MethodHolder method) {
-        AnnotationHolder annot = method.getAnnotations().get(JUNIT4_TEST);
-        if (annot == null) {
-            return new String[0];
-        }
-        AnnotationValue expected = annot.getValue("expected");
-        if (expected == null) {
-            return new String[0];
+    static String[] getExpectedExceptions(MethodReader method) {
+        AnnotationReader annot = method.getAnnotations().get(JUNIT4_TEST);
+        if (annot != null) {
+            AnnotationValue expected = annot.getValue("expected");
+            if (expected == null) {
+                return new String[0];
+            }
+
+            ValueType result = expected.getJavaClass();
+            return new String[] { ((ValueType.Object) result).getClassName() };
         }
 
-        ValueType result = expected.getJavaClass();
-        return new String[] { ((ValueType.Object) result).getClassName() };
+        annot = method.getAnnotations().get(TESTNG_TEST);
+        if (annot != null) {
+            AnnotationValue expected = annot.getValue("expectedExceptions");
+            if (expected == null) {
+                return new String[0];
+            }
+
+            List<AnnotationValue> list = expected.getList();
+            String[] result = new String[list.size()];
+            for (int i = 0; i < list.size(); ++i) {
+                result[i] = ((ValueType.Object) list.get(i).getJavaClass()).getClassName();
+            }
+            return result;
+        }
+
+        return new String[0];
     }
 
-    private boolean runInJvm(Method child, RunNotifier notifier, Set<Class<?>> expectedExceptions) {
-        Description description = describeChild(child);
-        Runner runner;
+    private boolean runInJvm(Method testMethod, RunNotifier notifier, String[] expectedExceptions) {
+        Description description = describeChild(testMethod);
         Object instance;
         try {
-            instance = testClass.newInstance();
-        } catch (InstantiationException | IllegalAccessException e) {
+            instance = testClass.getConstructor().newInstance();
+        } catch (InstantiationException | IllegalAccessException | NoSuchMethodException e) {
+            notifier.fireTestFailure(new Failure(description, e));
+            return false;
+        } catch (InvocationTargetException e) {
+            notifier.fireTestFailure(new Failure(description, e.getTargetException()));
+            return false;
+        }
+
+        Runner runner;
+        try {
+            runner = prepareJvmRunner(instance, testMethod, expectedExceptions);
+        } catch (Throwable e) {
             notifier.fireTestFailure(new Failure(description, e));
             return false;
         }
-        if (!TestCase.class.isAssignableFrom(testClass)) {
-            runner = new JUnit4Runner(instance, child);
+
+        try {
+            runner.run(new Object[0]);
+            return true;
+        } catch (Throwable e) {
+            notifier.fireTestFailure(new Failure(description, e));
+            return false;
+        }
+    }
+
+    private Runner prepareJvmRunner(Object instance, Method testMethod, String[] expectedExceptions) throws Throwable {
+        Runner runner;
+        if (TestCase.class.isAssignableFrom(testClass)) {
+            runner = new JUnit3Runner((TestCase) instance, testMethod);
         } else {
-            runner = new JUnit3Runner(instance);
-            ((TestCase) instance).setName(child.getName());
+            runner = new SimpleMethodRunner(instance, testMethod);
         }
 
+        if (expectedExceptions.length > 0) {
+            runner = new WithExpectedExceptionRunner(runner, expectedExceptions);
+        }
+
+        runner = wrapWithBeforeAndAfter(runner, instance);
+        runner = wrapWithDataProvider(runner, instance, testMethod);
+
+        return runner;
+    }
+
+    private Runner wrapWithBeforeAndAfter(Runner runner, Object instance) throws Throwable {
         List<Class<?>> classes = new ArrayList<>();
         Class<?> cls = instance.getClass();
         while (cls != null) {
             classes.add(cls);
             cls = cls.getSuperclass();
         }
+
+        List<Method> afterMethods = new ArrayList<>();
+        for (Class<?> c : classes) {
+            for (Method method : c.getMethods()) {
+                if (method.isAnnotationPresent(After.class) || method.isAnnotationPresent(AfterMethod.class)) {
+                    afterMethods.add(method);
+                }
+            }
+        }
+
+        List<Method> beforeMethods = new ArrayList<>();
         Collections.reverse(classes);
         for (Class<?> c : classes) {
             for (Method method : c.getMethods()) {
-                if (method.isAnnotationPresent(Before.class)) {
-                    try {
-                        method.invoke(instance);
-                    } catch (InvocationTargetException e) {
-                        notifier.fireTestFailure(new Failure(description, e.getTargetException()));
-                    } catch (IllegalAccessException e) {
-                        notifier.fireTestFailure(new Failure(description, e));
-                    }
+                if (method.isAnnotationPresent(Before.class) || method.isAnnotationPresent(BeforeMethod.class)) {
+                    beforeMethods.add(method);
                 }
             }
         }
 
+        if (beforeMethods.isEmpty() && afterMethods.isEmpty()) {
+            return runner;
+        }
+
+        return new WithBeforeAndAfterRunner(runner, instance, beforeMethods.toArray(new Method[0]),
+                afterMethods.toArray(new Method[0]));
+    }
+
+    private Runner wrapWithDataProvider(Runner runner, Object instance, Method testMethod) throws Throwable {
+        org.testng.annotations.Test annot = testMethod.getAnnotation(org.testng.annotations.Test.class);
+        if (annot == null) {
+            return runner;
+        }
+
+        String providerName = annot.dataProvider();
+        if (providerName.isEmpty()) {
+            return runner;
+        }
+
+        Method provider = null;
+        for (Method method : testMethod.getDeclaringClass().getDeclaredMethods()) {
+            DataProvider providerAnnot = method.getAnnotation(DataProvider.class);
+            if (providerAnnot != null && providerAnnot.name().equals(providerName)) {
+                provider = method;
+                break;
+            }
+        }
+
+        Object data;
         try {
-            boolean expectedCaught = false;
-            try {
-                runner.run();
-            } catch (Throwable e) {
-                boolean wasExpected = false;
-                for (Class<?> expected : expectedExceptions) {
-                    if (expected.isInstance(e)) {
-                        expectedCaught = true;
-                        wasExpected = true;
-                    }
-                }
-                if (!wasExpected) {
-                    notifier.fireTestFailure(new Failure(description, e));
-                    return false;
-                }
-                return false;
-            }
-
-            if (!expectedCaught && !expectedExceptions.isEmpty()) {
-                notifier.fireTestAssumptionFailed(new Failure(description,
-                        new AssertionError("Expected exception was not thrown")));
-                return false;
-            }
-
-            return true;
-        } finally {
-            Collections.reverse(classes);
-            for (Class<?> c : classes) {
-                for (Method method : c.getMethods()) {
-                    if (method.isAnnotationPresent(After.class)) {
-                        try {
-                            method.invoke(instance);
-                        } catch (InvocationTargetException e) {
-                            notifier.fireTestFailure(new Failure(description, e.getTargetException()));
-                        } catch (IllegalAccessException e) {
-                            notifier.fireTestFailure(new Failure(description, e));
-                        }
-                    }
-                }
-            }
+            provider.setAccessible(true);
+            data = provider.invoke(instance);
+        } catch (InvocationTargetException e) {
+            throw e.getTargetException();
         }
+
+        return new WithDataProviderRunner(runner, data, testMethod.getParameterTypes());
     }
 
     interface Runner {
-        void run() throws Throwable;
+        void run(Object[] arguments) throws Throwable;
     }
 
-    static class JUnit4Runner implements Runner {
+    static class SimpleMethodRunner implements Runner {
         Object instance;
-        Method child;
+        Method testMethod;
 
-        JUnit4Runner(Object instance, Method child) {
+        SimpleMethodRunner(Object instance, Method testMethod) {
             this.instance = instance;
-            this.child = child;
+            this.testMethod = testMethod;
         }
 
         @Override
-        public void run() throws Throwable {
+        public void run(Object[] arguments) throws Throwable {
             try {
-                child.invoke(instance);
+                testMethod.invoke(instance, arguments);
             } catch (InvocationTargetException e) {
                 throw e.getTargetException();
             }
@@ -561,15 +613,153 @@ public class TeaVMTestRunner extends Runner implements Filterable {
     }
 
     static class JUnit3Runner implements Runner {
-        Object instance;
+        TestCase instance;
+        Method testMethod;
 
-        JUnit3Runner(Object instance) {
+        JUnit3Runner(TestCase instance, Method testMethod) {
             this.instance = instance;
+            this.testMethod = testMethod;
         }
 
         @Override
-        public void run() throws Throwable {
-            ((TestCase) instance).runBare();
+        public void run(Object[] arguments) throws Throwable {
+            instance.setName(testMethod.getName());
+            instance.runBare();
+        }
+    }
+
+    static class WithDataProviderRunner implements Runner {
+        Runner underlyingRunner;
+        Object data;
+        Class<?>[] types;
+
+        WithDataProviderRunner(Runner underlyingRunner, Object data, Class<?>[] types) {
+            this.underlyingRunner = underlyingRunner;
+            this.data = data;
+            this.types = types;
+        }
+
+        @Override
+        public void run(Object[] arguments) throws Throwable {
+            if (arguments.length > 0) {
+                throw new IllegalArgumentException("Expected 0 arguments");
+            }
+            if (data instanceof Iterator) {
+                runWithIteratorData((Iterator<?>) data);
+            } else {
+                runWithArrayData((Object[][]) data);
+            }
+        }
+
+        private void runWithArrayData(Object[][] data) throws Throwable {
+            for (int i = 0; i < data.length; ++i) {
+                runWithDataRow(data[i]);
+            }
+        }
+
+        private void runWithIteratorData(Iterator<?> data) throws Throwable {
+            while (data.hasNext()) {
+                runWithDataRow((Object[]) data.next());
+            }
+        }
+
+        private void runWithDataRow(Object[] dataRow) throws Throwable {
+            Object[] args = dataRow.clone();
+            for (int j = 0; j < args.length; ++j) {
+                args[j] = convert(args[j], types[j]);
+            }
+            underlyingRunner.run(args);
+        }
+
+        private Object convert(Object value, Class<?> type) {
+            if (type == byte.class) {
+                value = ((Number) value).byteValue();
+            } else if (type == short.class) {
+                value = ((Number) value).shortValue();
+            } else if (type == int.class) {
+                value = ((Number) value).intValue();
+            } else if (type == long.class) {
+                value = ((Number) value).longValue();
+            } else if (type == float.class) {
+                value = ((Number) value).floatValue();
+            } else if (type == double.class) {
+                value = ((Number) value).doubleValue();
+            }
+            return value;
+        }
+    }
+
+    static class WithExpectedExceptionRunner implements Runner {
+        private Runner underlyingRunner;
+        private String[] expectedExceptions;
+
+        WithExpectedExceptionRunner(Runner underlyingRunner, String[] expectedExceptions) {
+            this.underlyingRunner = underlyingRunner;
+            this.expectedExceptions = expectedExceptions;
+        }
+
+        @Override
+        public void run(Object[] arguments) throws Throwable {
+            boolean caught = false;
+            try {
+                underlyingRunner.run(arguments);
+            } catch (Exception e) {
+                for (String expected : expectedExceptions) {
+                    if (isSubtype(e.getClass(), expected)) {
+                        caught = true;
+                        break;
+                    }
+                }
+                if (!caught) {
+                    throw e;
+                }
+            }
+            if (!caught) {
+                throw new AssertionError("Expected exception not thrown");
+            }
+        }
+
+        private boolean isSubtype(Class<?> cls, String superType) {
+            while (cls != Throwable.class) {
+                if (cls.getName().equals(superType)) {
+                    return true;
+                }
+                cls = cls.getSuperclass();
+            }
+            return false;
+        }
+    }
+
+    static class WithBeforeAndAfterRunner implements Runner {
+        private Runner underlyingRunner;
+        private Object instance;
+        private Method[] beforeMethods;
+        private Method[] afterMethods;
+
+        WithBeforeAndAfterRunner(Runner underlyingRunner, Object instance, Method[] beforeMethods,
+                Method[] afterMethods) {
+            this.underlyingRunner = underlyingRunner;
+            this.instance = instance;
+            this.beforeMethods = beforeMethods;
+            this.afterMethods = afterMethods;
+        }
+
+        @Override
+        public void run(Object[] arguments) throws Throwable {
+            for (Method method : beforeMethods) {
+                try {
+                    method.invoke(instance);
+                } catch (InvocationTargetException e) {
+                    throw e.getTargetException();
+                }
+            }
+            try {
+                underlyingRunner.run(arguments);
+            } finally {
+                for (Method method : afterMethods) {
+                    method.invoke(instance);
+                }
+            }
         }
     }
 
