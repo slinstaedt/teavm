@@ -365,7 +365,7 @@ public class TeaVMTestRunner extends Runner implements Filterable {
         File outputPath = getOutputPathForClass();
         File outputPathForMethod = getOutputPath(child);
         MethodDescriptor descriptor = getDescriptor(child);
-        MethodReference reference = new MethodReference(testClass.getName(), descriptor);
+        MethodReference reference = new MethodReference(child.getDeclaringClass().getName(), descriptor);
 
         File testFilePath = getOutputPath(child);
         testFilePath.mkdirs();
@@ -373,7 +373,8 @@ public class TeaVMTestRunner extends Runner implements Filterable {
         Map<String, String> properties = new HashMap<>();
         for (TeaVMTestConfiguration<JavaScriptTarget> configuration : getJavaScriptConfigurations()) {
             File testPath = getOutputFile(outputPath, "classTest", configuration.getSuffix(), false, ".js");
-            runs.add(createTestRun(testPath, child, RunKind.JAVASCRIPT, reference.toString(), notifier, onSuccess));
+            runs.add(createTestRun(configuration, testPath, child, RunKind.JAVASCRIPT, reference.toString(),
+                    notifier, onSuccess));
             File htmlPath = getOutputFile(outputPathForMethod, "test", configuration.getSuffix(), false, ".html");
             properties.put("SCRIPT", "../" + testPath.getName());
             properties.put("IDENTIFIER", reference.toString());
@@ -386,12 +387,14 @@ public class TeaVMTestRunner extends Runner implements Filterable {
 
         for (TeaVMTestConfiguration<WasmTarget> configuration : getWasmConfigurations()) {
             File testPath = getOutputFile(outputPath, "classTest", configuration.getSuffix(), false, ".wasm");
-            runs.add(createTestRun(testPath, child, RunKind.WASM, reference.toString(), notifier, onSuccess));
+            runs.add(createTestRun(configuration, testPath, child, RunKind.WASM, reference.toString(),
+                    notifier, onSuccess));
         }
 
         for (TeaVMTestConfiguration<CTarget> configuration : getCConfigurations()) {
             File testPath = getOutputFile(outputPath, "classTest", configuration.getSuffix(), true, ".c");
-            runs.add(createTestRun(testPath, child, RunKind.C, reference.toString(), notifier, onSuccess));
+            runs.add(createTestRun(configuration, testPath, child, RunKind.C, reference.toString(),
+                    notifier, onSuccess));
         }
     }
 
@@ -402,7 +405,7 @@ public class TeaVMTestRunner extends Runner implements Filterable {
             Map<String, String> properties = new HashMap<>();
             for (TeaVMTestConfiguration<JavaScriptTarget> configuration : getJavaScriptConfigurations()) {
                 CompileResult compileResult = compileToJs(singleTest(child), "test", configuration, outputPath);
-                TestRun run = prepareRun(child, compileResult, notifier, RunKind.JAVASCRIPT, onSuccess);
+                TestRun run = prepareRun(configuration, child, compileResult, notifier, RunKind.JAVASCRIPT, onSuccess);
                 if (run != null) {
                     runs.add(run);
 
@@ -421,7 +424,7 @@ public class TeaVMTestRunner extends Runner implements Filterable {
 
             for (TeaVMTestConfiguration<CTarget> configuration : getCConfigurations()) {
                 CompileResult compileResult = compileToC(singleTest(child), "test", configuration, outputPath);
-                TestRun run = prepareRun(child, compileResult, notifier, RunKind.C, onSuccess);
+                TestRun run = prepareRun(configuration, child, compileResult, notifier, RunKind.C, onSuccess);
                 if (run != null) {
                     runs.add(run);
                 }
@@ -430,7 +433,7 @@ public class TeaVMTestRunner extends Runner implements Filterable {
             for (TeaVMTestConfiguration<WasmTarget> configuration : getWasmConfigurations()) {
                 CompileResult compileResult = compileToWasm(singleTest(child), "test", configuration,
                         outputPath);
-                TestRun run = prepareRun(child, compileResult, notifier, RunKind.WASM, onSuccess);
+                TestRun run = prepareRun(configuration, child, compileResult, notifier, RunKind.WASM, onSuccess);
                 if (run != null) {
                     runs.add(run);
                 }
@@ -763,8 +766,8 @@ public class TeaVMTestRunner extends Runner implements Filterable {
         }
     }
 
-    private TestRun prepareRun(Method child, CompileResult result, RunNotifier notifier, RunKind kind,
-            Consumer<Boolean> onComplete) {
+    private TestRun prepareRun(TeaVMTestConfiguration<?> configuration, Method child, CompileResult result,
+            RunNotifier notifier, RunKind kind, Consumer<Boolean> onComplete) {
         Description description = describeChild(child);
 
         if (!result.success) {
@@ -774,11 +777,11 @@ public class TeaVMTestRunner extends Runner implements Filterable {
             return null;
         }
 
-        return createTestRun(result.file, child, kind, null, notifier, onComplete);
+        return createTestRun(configuration, result.file, child, kind, null, notifier, onComplete);
     }
 
-    private TestRun createTestRun(File file, Method child, RunKind kind, String argument, RunNotifier notifier,
-            Consumer<Boolean> onComplete) {
+    private TestRun createTestRun(TeaVMTestConfiguration<?> configuration, File file, Method child, RunKind kind,
+            String argument, RunNotifier notifier, Consumer<Boolean> onComplete) {
         Description description = describeChild(child);
 
         TestRunCallback callback = new TestRunCallback() {
@@ -794,8 +797,16 @@ public class TeaVMTestRunner extends Runner implements Filterable {
             }
         };
 
-        return new TestRun(file.getParentFile(), child, description, file.getName(), kind,
-                argument, callback);
+        return new TestRun(generateName(child.getName(), configuration), file.getParentFile(), child, description,
+                file.getName(), kind, argument, callback);
+    }
+
+    private String generateName(String baseName, TeaVMTestConfiguration<?> configuration) {
+        String suffix = configuration.getSuffix();
+        if (!suffix.isEmpty()) {
+            baseName = baseName + " (" + suffix + ")";
+        }
+        return baseName;
     }
 
     private Failure createFailure(Description description, CompileResult result) {
@@ -1206,6 +1217,9 @@ public class TeaVMTestRunner extends Runner implements Filterable {
                     writer.write("    \"argument\": ");
                     writeJsonString(writer, run.getArgument());
                 }
+                writer.write(",\n");
+                writer.write("    \"name\": ");
+                writeJsonString(writer, run.getName());
                 writer.write("\n  }");
             }
             writer.write("\n]");

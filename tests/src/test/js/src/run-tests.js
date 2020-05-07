@@ -29,10 +29,11 @@ class TestSuite {
     }
 }
 class TestCase {
-    constructor(type, file, argument) {
+    constructor(type, file, argument, name) {
         this.type = type;
         this.file = file;
         this.argument = argument
+        this.name = name
     }
 }
 
@@ -113,11 +114,11 @@ async function walkDir(path, suite) {
     const files = await fs.readdir(rootDir + "/" + path);
     if (files.includes("tests.json")) {
         const descriptor = JSON.parse(await fs.readFile(`${rootDir}/${path}/tests.json`));
-        for (const { baseDir, fileName, kind, argument } of descriptor) {
+        for (const { baseDir, fileName, kind, argument, name } of descriptor) {
             switch (kind) {
                 case "JAVASCRIPT":
                 case "WASM":
-                    suite.testCases.push(new TestCase(kind, `${baseDir}/${fileName}`, argument));
+                    suite.testCases.push(new TestCase(kind, `${baseDir}/${fileName}`, argument, name));
                     totalTests++;
                     break;
             }
