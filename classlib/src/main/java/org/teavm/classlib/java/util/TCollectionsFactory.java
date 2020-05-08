@@ -21,9 +21,9 @@ import java.util.RandomAccess;
 /**
  * Factory-methods for List/Set/Map.of(...).
  */
-class CollectionsFactory {
+class TCollectionsFactory {
 
-    private CollectionsFactory() {
+    private TCollectionsFactory() {
     }
 
     @SafeVarargs

@@ -1304,13 +1304,18 @@ public class DateTimeZoneBuilder {
                 LocalDateTime transitionTime = LocalDateTime.ofEpochSecond(time / 1000,
                         (int) (time % 1000) * 1000000, ZoneOffset.UTC);
                 if (iStandardOffsets[i] != iStandardOffsets[i - 1]) {
-                    ZoneOffset offset = ZoneOffset.ofTotalSeconds(iStandardOffsets[i] / 1000);
-                    standardTransitions.add(ZoneOffsetTransition.of(transitionTime, lastStandardOffset, offset));
+                    int offsetInSeconds = iStandardOffsets[i] / 1000;
+                    int lastOffsetInSeconds = lastStandardOffset.getTotalSeconds();
+                    ZoneOffset offset = ZoneOffset.ofTotalSeconds(offsetInSeconds);
+                    standardTransitions.add(ZoneOffsetTransition.of(transitionTime.plusSeconds(lastOffsetInSeconds),
+                            lastStandardOffset, offset));
                     lastStandardOffset = offset;
                 }
                 if (iWallOffsets[i] != iWallOffsets[i - 1]) {
                     ZoneOffset offset = ZoneOffset.ofTotalSeconds(iWallOffsets[i] / 1000);
-                    transitions.add(ZoneOffsetTransition.of(transitionTime, lastOffset, offset));
+                    int lastOffsetInSeconds = lastOffset.getTotalSeconds();
+                    transitions.add(ZoneOffsetTransition.of(transitionTime.plusSeconds(lastOffsetInSeconds),
+                            lastOffset, offset));
                     lastOffset = offset;
                 }
             }

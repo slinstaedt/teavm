@@ -25,51 +25,51 @@ public class CollectionsFactoryTest {
     public void createList() {
         assertEquals(
                 TArrays.asList(1, 2, 3),
-                CollectionsFactory.createList(1, 2, 3)
+                TCollectionsFactory.createList(1, 2, 3)
         );
     }
 
     @Test
     public void createList_zero_elements() {
-        assertSame(CollectionsFactory.createList(), TCollections.emptyList());
+        assertSame(TCollectionsFactory.createList(), TCollections.emptyList());
     }
 
     @Test(expected = NullPointerException.class)
     public void createList_null_element() {
-        CollectionsFactory.createList(new Object[] { null });
+        TCollectionsFactory.createList(new Object[] { null });
     }
 
     @Test(expected = NullPointerException.class)
     public void createList_null_array() {
-        CollectionsFactory.createList((Object[]) null);
+        TCollectionsFactory.createList((Object[]) null);
     }
 
     @Test
     public void createSet() {
         assertEquals(
                 new THashSet<>(TArrays.asList(1, 2, 3)),
-                CollectionsFactory.createSet(1, 2, 3)
+                TCollectionsFactory.createSet(1, 2, 3)
         );
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void createSet_duplicate_elements() {
-        CollectionsFactory.createSet(1, 1, 1);
+        TCollectionsFactory.createSet(1, 1, 1);
     }
 
     @Test
     public void createSet_zero_elements() {
-        assertSame(CollectionsFactory.createSet(), TCollections.emptySet());
+        assertSame(TCollectionsFactory.createSet(), TCollections.emptySet());
     }
 
     @Test(expected = NullPointerException.class)
     public void createSet_null_element() {
-        CollectionsFactory.createSet(new Object[] { null });
+        TCollectionsFactory.createSet(new Object[] { null });
     }
 
     @Test(expected = NullPointerException.class)
     public void createSet_null_array() {
-        CollectionsFactory.createSet((Object[]) null);
+        TCollectionsFactory.createSet((Object[]) null);
     }
 
     @Test
@@ -81,7 +81,7 @@ public class CollectionsFactoryTest {
 
         assertEquals(
                 hashMap,
-                CollectionsFactory.createMap(
+                TCollectionsFactory.createMap(
                         TMap.entry(1, "one"),
                         TMap.entry(2, "two"),
                         TMap.entry(3, "three")
@@ -91,12 +91,12 @@ public class CollectionsFactoryTest {
 
     @Test(expected = NullPointerException.class)
     public void createMap_null_key() {
-        CollectionsFactory.createMap(TMap.entry(null, "value"));
+        TCollectionsFactory.createMap(TMap.entry(null, "value"));
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void createMap_duplicate_key() {
-        CollectionsFactory.createMap(
+        TCollectionsFactory.createMap(
                 TMap.entry(1, "value"),
                 TMap.entry(1, "another value")
         );
@@ -104,7 +104,7 @@ public class CollectionsFactoryTest {
 
     @Test(expected = NullPointerException.class)
     public void createMap_null_value() {
-        CollectionsFactory.createMap(TMap.entry("key", null));
+        TCollectionsFactory.createMap(TMap.entry("key", null));
     }
 
     @Test
@@ -115,7 +115,7 @@ public class CollectionsFactoryTest {
 
         assertEquals(
                 hashMap,
-                CollectionsFactory.createMap(
+                TCollectionsFactory.createMap(
                         TMap.entry(1, "value"),
                         TMap.entry(2, "value")
                 )
@@ -124,11 +124,11 @@ public class CollectionsFactoryTest {
 
     @Test
     public void createMap_zero_elements() {
-        assertSame(CollectionsFactory.createMap(), TCollections.emptyMap());
+        assertSame(TCollectionsFactory.createMap(), TCollections.emptyMap());
     }
 
     @Test(expected = NullPointerException.class)
     public void createMap_null_array() {
-        CollectionsFactory.createMap((TMap.Entry<Object, Object>[]) null);
+        TCollectionsFactory.createMap((TMap.Entry<Object, Object>[]) null);
     }
 }
